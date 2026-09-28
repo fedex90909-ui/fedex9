@@ -1,0 +1,28 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+dist-ssr/
+
+# Environment — never commit real secrets
+.env
+.env.*
+!.env.example
+
+# Logs and temp files
+logs/
+*.log
+npm-debug.log*
+*.tsbuildinfo
+
+# Editor / OS
+.vscode/*
+!.vscode/extensions.json
+.idea/
+.DS_Store
+Thumbs.db
+
+# Caches
+.cache/
+.vite/

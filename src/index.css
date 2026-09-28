@@ -1,0 +1,189 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html {
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+  body {
+    @apply bg-cloud font-sans text-ink;
+  }
+  ::selection {
+    @apply bg-fx-orange-100 text-fx-purple-800;
+  }
+}
+
+@layer components {
+  .container-x {
+    @apply mx-auto w-full max-w-7xl px-4 sm:px-6 lg:px-8;
+  }
+  .section {
+    @apply py-16 sm:py-20 lg:py-24;
+  }
+  .kicker {
+    @apply text-xs font-bold uppercase tracking-[0.18em] text-fx-orange-600;
+  }
+  .h-section {
+    @apply mt-3 text-3xl font-extrabold tracking-tight text-ink sm:text-4xl;
+  }
+  .btn-primary {
+    @apply inline-flex items-center justify-center gap-2 rounded-full bg-fx-orange-500 px-5 py-2.5 text-sm font-bold text-white shadow-btn-orange transition-all duration-200 hover:bg-fx-orange-600 hover:shadow-lg active:scale-[.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-fx-orange-400 focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-60;
+  }
+  .btn-purple {
+    @apply inline-flex items-center justify-center gap-2 rounded-full bg-fx-purple-600 px-5 py-2.5 text-sm font-bold text-white shadow-btn-purple transition-all duration-200 hover:bg-fx-purple-700 hover:shadow-lg active:scale-[.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-fx-purple-400 focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-60;
+  }
+  .btn-outline {
+    @apply inline-flex items-center justify-center gap-2 rounded-full border border-gray-300 bg-white px-5 py-2.5 text-sm font-semibold text-gray-800 transition-all duration-200 hover:border-fx-purple-400 hover:text-fx-purple-700 active:scale-[.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-fx-purple-400 focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-60;
+  }
+  .btn-ghost {
+    @apply inline-flex items-center justify-center gap-2 rounded-full px-4 py-2 text-sm font-semibold text-gray-700 transition-colors duration-200 hover:bg-gray-100 hover:text-fx-purple-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-fx-purple-400 focus-visible:ring-offset-2;
+  }
+  .btn-white {
+    @apply inline-flex items-center justify-center gap-2 rounded-full bg-white px-5 py-2.5 text-sm font-bold text-fx-purple-800 shadow-md transition-all duration-200 hover:bg-purple-50 active:scale-[.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white focus-visible:ring-offset-2 focus-visible:ring-offset-fx-purple-700;
+  }
+  .btn-lg {
+    @apply px-7 py-3.5 text-base;
+  }
+  .card {
+    @apply rounded-2xl border border-gray-200/70 bg-white shadow-card;
+  }
+  .label {
+    @apply mb-1.5 block text-sm font-semibold text-gray-700;
+  }
+  .input {
+    @apply w-full rounded-xl border border-gray-300 bg-white px-3.5 py-2.5 text-sm text-ink transition placeholder:text-gray-400 focus:border-fx-purple-500 focus:outline-none focus:ring-4 focus:ring-fx-purple-500/10;
+  }
+  .input-error {
+    @apply border-red-400 focus:border-red-500 focus:ring-red-500/10;
+  }
+  .error-text {
+    @apply mt-1.5 flex items-center gap-1 text-xs font-semibold text-red-600;
+  }
+  .nav-link {
+    @apply relative rounded-md px-1 py-1 text-sm font-semibold text-gray-600 transition-colors duration-200 hover:text-fx-purple-700;
+  }
+  .nav-link-active {
+    @apply text-fx-purple-700;
+  }
+  .chip {
+    @apply inline-flex items-center gap-1.5 rounded-full bg-fx-purple-50 px-3 py-1.5 text-xs font-bold text-fx-purple-700 ring-1 ring-inset ring-fx-purple-200/60;
+  }
+  .dot-bg {
+    background-image: radial-gradient(rgba(77, 20, 140, 0.10) 1.2px, transparent 1.2px);
+    background-size: 22px 22px;
+  }
+  .dot-bg-light {
+    background-image: radial-gradient(rgba(255, 255, 255, 0.14) 1.2px, transparent 1.2px);
+    background-size: 24px 24px;
+  }
+}
+
+/* Scroll-reveal (driven by <Reveal /> + IntersectionObserver) */
+.reveal {
+  opacity: 0;
+  transform: translateY(20px);
+  transition:
+    opacity 0.7s ease,
+    transform 0.7s cubic-bezier(0.22, 0.61, 0.36, 1);
+  will-change: opacity, transform;
+}
+.reveal-visible {
+  opacity: 1;
+  transform: none;
+}
+
+/* Accordion height animation (grid-rows trick) */
+.acc-panel {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows 0.35s cubic-bezier(0.22, 0.61, 0.36, 1);
+}
+.acc-panel.open {
+  grid-template-rows: 1fr;
+}
+.acc-inner {
+  overflow: hidden;
+}
+
+/* Progress bar fill */
+.progress-fill {
+  transition: width 1.1s cubic-bezier(0.22, 0.61, 0.36, 1);
+}
+
+/* Route dashes */
+.route-dash {
+  stroke-dasharray: 4 10;
+  animation: dashmove 1.8s linear infinite;
+}
+@keyframes dashmove {
+  to {
+    stroke-dashoffset: -56;
+  }
+}
+
+/* Success check draw */
+.check-draw {
+  stroke-dasharray: 60;
+  stroke-dashoffset: 60;
+  animation: draw 0.6s 0.25s cubic-bezier(0.65, 0, 0.35, 1) forwards;
+}
+@keyframes draw {
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+/* Toast slide */
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(12px) scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+.toast-item {
+  animation: toast-in 0.3s cubic-bezier(0.22, 0.61, 0.36, 1) both;
+}
+
+/* Floating SVG groups (needs fill-box origin in SVG) */
+.svg-float {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: svgfloat 5.5s ease-in-out infinite;
+}
+.svg-float-slow {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: svgfloat 8s ease-in-out infinite;
+}
+@keyframes svgfloat {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-8px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+  .reveal {
+    opacity: 1;
+    transform: none;
+  }
+  html {
+    scroll-behavior: auto;
+  }
+}
