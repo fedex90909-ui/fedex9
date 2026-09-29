@@ -1,7 +1,6 @@
 import type { PublicUser, SessionRecord, UserRecord, UserRole, UserAddress } from '../types/models'
 import { ADMIN_EMAILS } from '../lib/config'
-import { KEYS, readCollection, uid, writeCollection } from './db'
-import { supabase } from '../lib/supabase'
+import { KEYS, readCollection, uid, usersCollection, writeCollection } from './db'
 
 export class AuthError extends Error {}
 
@@ -52,34 +51,6 @@ function base64ToBytes(b64: string): Uint8Array {
   return out
 }
 
-/* --------------------- Supabase row ↔ UserRecord mapping --------------------- */
-
-interface AccountRow {
-  id: string
-  name: string
-  email: string
-  phone: string
-  password_hash: string
-  role: UserRole
-  address: UserAddress
-  created_at: string
-  updated_at: string
-}
-
-function rowToUser(row: AccountRow): UserRecord {
-  return {
-    id: row.id,
-    name: row.name,
-    email: row.email,
-    phone: row.phone,
-    passwordHash: row.password_hash,
-    role: row.role,
-    address: row.address ?? { street: '', city: '', state: '', country: '', zip: '' },
-    createdAt: row.created_at,
-    updatedAt: row.updated_at,
-  }
-}
-
 function toPublic(u: UserRecord): PublicUser {
   const { passwordHash: _ph, ...rest } = u
   return rest
@@ -90,11 +61,6 @@ function toPublic(u: UserRecord): PublicUser {
 const SESSION_KEY = 'fx.session' // current token pointer
 const REMEMBER_MS = 30 * 24 * 3600_000
 const SHORT_MS = 12 * 3600_000
-
-/** In-memory cache of the current user, populated by currentUser() during boot.
- *  Service callers use requireUser()/requireAdmin() which read this cache
- *  synchronously — avoiding an async cascade through every service and page. */
-let cachedUser: PublicUser | null = null
 
 function setSessionPointer(token: string | null): void {
   try {
@@ -113,43 +79,27 @@ function readSessionPointer(): string | null {
   }
 }
 
-/** Resolves the current user from Supabase via the localStorage session token.
- *  Populates the in-memory cache so synchronous callers (requireUser etc.) work. */
-export async function currentUser(): Promise<PublicUser | null> {
+export function currentUser(): PublicUser | null {
   const token = readSessionPointer()
-  if (!token) {
-    cachedUser = null
-    return null
-  }
+  if (!token) return null
   const sessions = readCollection<SessionRecord>(KEYS.sessions)
   const session = sessions.find((s) => s.token === token)
-  if (!session) {
-    cachedUser = null
-    return null
-  }
+  if (!session) return null
   if (new Date(session.expiresAt).getTime() < Date.now()) {
+    // Expired — clean up.
     writeCollection(KEYS.sessions, sessions.filter((s) => s.token !== token))
     setSessionPointer(null)
-    cachedUser = null
     return null
   }
-  const { data, error } = await supabase
-    .from('accounts')
-    .select('id, name, email, phone, password_hash, role, address, created_at, updated_at')
-    .eq('id', session.userId)
-    .maybeSingle()
-  if (error || !data) {
-    cachedUser = null
-    return null
-  }
-  cachedUser = toPublic(rowToUser(data as AccountRow))
-  return cachedUser
+  const user = usersCollection()
+    .read()
+    .find((u) => u.id === session.userId)
+  return user ? toPublic(user) : null
 }
 
-/** Synchronous guard: returns the cached current user. Must be called after
- *  AuthProvider boot has completed (currentUser() resolved). */
+/** Server-seam guard: every privileged service call funnels through here. */
 export function requireUser(): PublicUser {
-  const u = cachedUser
+  const u = currentUser()
   if (!u) throw new AuthError('Authentication required')
   return u
 }
@@ -174,17 +124,12 @@ function createSession(userId: string, remember: boolean): SessionRecord {
   return session
 }
 
-async function grantAdminIfNeeded(user: UserRecord): Promise<UserRecord> {
+function grantAdminIfNeeded(user: UserRecord): UserRecord {
   if (user.role === 'admin') return user
   if (ADMIN_EMAILS.includes(user.email.toLowerCase())) {
+    const users = usersCollection()
     const updated = { ...user, role: 'admin' as UserRole, updatedAt: new Date().toISOString() }
-    const { error } = await supabase
-      .from('accounts')
-      .update({ role: 'admin', updated_at: updated.updatedAt })
-      .eq('id', user.id)
-    if (error) {
-      console.warn('Failed to persist admin role upgrade:', error.message)
-    }
+    users.write(users.read().map((u) => (u.id === user.id ? updated : u)))
     return updated
   }
   return user
@@ -199,51 +144,26 @@ export async function signUp(input: {
   password: string
 }): Promise<PublicUser> {
   const email = input.email.trim().toLowerCase()
-  const { data: existing, error: checkError } = await supabase
-    .from('accounts')
-    .select('id')
-    .eq('email', email)
-    .maybeSingle()
-  if (checkError) throw new AuthError('Could not verify account. Please try again.')
-  if (existing) throw new AuthError('An account with this email already exists')
-
+  const users = usersCollection()
+  if (users.read().some((u) => u.email.toLowerCase() === email)) {
+    throw new AuthError('An account with this email already exists')
+  }
   const passwordHash = await hashPassword(input.password)
   const now = new Date().toISOString()
-  const id = uid('usr')
-  const role: UserRole = ADMIN_EMAILS.includes(email) ? 'admin' : 'user'
-
-  const { error: insertError } = await supabase.from('accounts').insert({
-    id,
-    name: input.name.trim(),
-    email,
-    phone: input.phone.trim(),
-    password_hash: passwordHash,
-    role,
-    address: { street: '', city: '', state: '', country: '', zip: '' },
-    created_at: now,
-    updated_at: now,
-  })
-  if (insertError) {
-    if (insertError.code === '23505') {
-      throw new AuthError('An account with this email already exists')
-    }
-    throw new AuthError('Could not create your account. Please try again.')
-  }
-
   const user: UserRecord = {
-    id,
+    id: uid('usr'),
     name: input.name.trim(),
     email,
     phone: input.phone.trim(),
     passwordHash,
-    role,
+    role: ADMIN_EMAILS.includes(email) ? 'admin' : 'user',
     address: { street: '', city: '', state: '', country: '', zip: '' },
     createdAt: now,
     updatedAt: now,
   }
+  users.write([...users.read(), user])
   createSession(user.id, true)
-  cachedUser = toPublic(user)
-  return cachedUser
+  return toPublic(user)
 }
 
 export async function signIn(input: {
@@ -252,26 +172,17 @@ export async function signIn(input: {
   remember: boolean
 }): Promise<PublicUser> {
   const email = input.email.trim().toLowerCase()
-  const { data, error } = await supabase
-    .from('accounts')
-    .select('id, name, email, phone, password_hash, role, address, created_at, updated_at')
-    .eq('email', email)
-    .maybeSingle()
-
+  const user = usersCollection()
+    .read()
+    .find((u) => u.email.toLowerCase() === email)
+  // Small constant delay to blunt timing probes and feel like a network call.
   await new Promise((r) => setTimeout(r, 350))
-
-  if (error || !data) {
+  if (!user || !(await verifyPassword(input.password, user.passwordHash))) {
     throw new AuthError('Invalid email or password')
   }
-
-  const user = rowToUser(data as AccountRow)
-  if (!(await verifyPassword(input.password, user.passwordHash))) {
-    throw new AuthError('Invalid email or password')
-  }
-  const elevated = await grantAdminIfNeeded(user)
+  const elevated = grantAdminIfNeeded(user)
   createSession(elevated.id, input.remember)
-  cachedUser = toPublic(elevated)
-  return cachedUser
+  return toPublic(elevated)
 }
 
 export function signOut(): void {
@@ -284,47 +195,39 @@ export function signOut(): void {
     )
   }
   setSessionPointer(null)
-  cachedUser = null
 }
 
 export async function updateProfile(
   userId: string,
   patch: { name: string; email: string; phone: string; address: UserAddress },
 ): Promise<PublicUser> {
+  const users = usersCollection()
   const email = patch.email.trim().toLowerCase()
-
-  const { data: clash } = await supabase
-    .from('accounts')
-    .select('id')
-    .eq('email', email)
-    .neq('id', userId)
-    .maybeSingle()
+  const clash = users
+    .read()
+    .find((u) => u.email.toLowerCase() === email && u.id !== userId)
   if (clash) throw new AuthError('Another account already uses this email')
-
-  const now = new Date().toISOString()
-  const { error } = await supabase
-    .from('accounts')
-    .update({
-      name: patch.name.trim(),
-      email,
-      phone: patch.phone.trim(),
-      address: patch.address,
-      updated_at: now,
-    })
-    .eq('id', userId)
-  if (error) throw new AuthError('Could not save profile. Please try again.')
-
-  const { data: updated, error: fetchError } = await supabase
-    .from('accounts')
-    .select('id, name, email, phone, password_hash, role, address, created_at, updated_at')
-    .eq('id', userId)
-    .maybeSingle()
-  if (fetchError || !updated) throw new AuthError('Account not found')
-  cachedUser = toPublic(rowToUser(updated as AccountRow))
-  return cachedUser
+  const updated = users.read().map((u) =>
+    u.id === userId
+      ? {
+          ...u,
+          name: patch.name.trim(),
+          email,
+          phone: patch.phone.trim(),
+          address: patch.address,
+          updatedAt: new Date().toISOString(),
+          // role and passwordHash are intentionally not editable here
+        }
+      : u,
+  )
+  users.write(updated)
+  const me = updated.find((u) => u.id === userId)
+  if (!me) throw new AuthError('Account not found')
+  return toPublic(me)
 }
 
 export async function requestPasswordReset(email: string): Promise<void> {
+  // Demo stub: a real deployment sends a signed reset link via the backend.
   await new Promise((r) => setTimeout(r, 500))
   if (!email.trim()) throw new AuthError('Enter your email address')
 }
@@ -334,21 +237,16 @@ export async function changePassword(
   currentPw: string,
   newPw: string,
 ): Promise<void> {
-  const { data, error } = await supabase
-    .from('accounts')
-    .select('password_hash')
-    .eq('id', userId)
-    .maybeSingle()
-  if (error || !data) throw new AuthError('Account not found')
-
-  const stored = (data as { password_hash: string }).password_hash
-  if (!(await verifyPassword(currentPw, stored))) {
+  const users = usersCollection()
+  const user = users.read().find((u) => u.id === userId)
+  if (!user) throw new AuthError('Account not found')
+  if (!(await verifyPassword(currentPw, user.passwordHash))) {
     throw new AuthError('Current password is incorrect')
   }
   const passwordHash = await hashPassword(newPw)
-  const { error: updateError } = await supabase
-    .from('accounts')
-    .update({ password_hash: passwordHash, updated_at: new Date().toISOString() })
-    .eq('id', userId)
-  if (updateError) throw new AuthError('Could not change password. Please try again.')
+  users.write(
+    users.read().map((u) =>
+      u.id === userId ? { ...u, passwordHash, updatedAt: new Date().toISOString() } : u,
+    ),
+  )
 }

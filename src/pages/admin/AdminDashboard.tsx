@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useMemo } from 'react'
 import { Link } from 'react-router-dom'
 import {
   Boxes,
@@ -35,11 +35,7 @@ const PAYMENT_COLORS: Record<string, string> = {
 export default function AdminDashboard() {
   const shipments = useMemo(() => listAllShipments(), [])
   const payments = useMemo(() => listAllPayments(), [])
-  const [userCount, setUserCount] = useState(0)
-
-  useEffect(() => {
-    countUsers().then(setUserCount)
-  }, [])
+  const userCount = useMemo(() => countUsers(), [])
 
   const byStatus = (status: string) => shipments.filter((s) => s.status === status).length
   const pendingPayments = payments.filter((p) => p.status === 'pending').length

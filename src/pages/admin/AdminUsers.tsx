@@ -1,9 +1,9 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { Search, ShieldCheck, UserRound } from 'lucide-react'
 import Modal from '../../components/Modal'
 import { useToast } from '../../context/ToastContext'
-import { listUsers, updateUserRole } from '../../services/usersService'
+import { getUserById, listUsers, updateUserRole } from '../../services/usersService'
 import { listAllShipments } from '../../services/shipmentsService'
 import { listAllPayments } from '../../services/paymentsService'
 import { useAuth } from '../../hooks/useAuth'
@@ -12,7 +12,7 @@ import type { PaymentRecord, ShipmentRecord, UserWithStats } from '../../types/m
 
 export default function AdminUsers() {
   const [tick, setTick] = useState(0)
-  const [users, setUsers] = useState<UserWithStats[]>([])
+  const users = useMemo(() => listUsers(), [tick])
   const { user: me } = useAuth()
   const toast = useToast()
   const [query, setQuery] = useState('')
@@ -22,25 +22,16 @@ export default function AdminUsers() {
   const shipments = useMemo(() => listAllShipments(), [tick])
   const payments = useMemo(() => listAllPayments(), [tick])
 
-  useEffect(() => {
-    listUsers()
-      .then(setUsers)
-      .catch((err) => {
-        console.error('Failed to load users:', err)
-        toast.error('Could not load users', err instanceof Error ? err.message : 'Try refreshing the page.')
-      })
-  }, [tick])
-
   const filtered = users.filter((u) => {
     const q = query.trim().toLowerCase()
     if (!q) return true
     return [u.name, u.email, u.phone].join(' ').toLowerCase().includes(q)
   })
 
-  async function applyRoleChange() {
+  function applyRoleChange() {
     if (!managing || !pendingRole) return
     try {
-      await updateUserRole(managing.id, pendingRole, me?.id ?? '')
+      updateUserRole(managing.id, pendingRole, me?.id ?? '')
       toast.success('Role updated', `${managing.name} is now ${pendingRole === 'admin' ? 'an administrator' : 'a user'}.`)
       setPendingRole(null)
       setManaging(null)

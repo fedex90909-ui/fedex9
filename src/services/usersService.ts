@@ -1,78 +1,56 @@
-import type { PublicUser, UserRole, UserWithStats, UserAddress } from '../types/models'
+import type { PublicUser, UserRole, UserWithStats } from '../types/models'
+import { KEYS, readCollection } from './db'
 import { requireAdmin } from './authService'
 import { listAllShipments } from './shipmentsService'
 import { listAllPayments } from './paymentsService'
-import { supabase } from '../lib/supabase'
 
-interface AccountRow {
-  id: string
-  name: string
-  email: string
-  phone: string
-  role: UserRole
-  address: UserAddress
-  created_at: string
-}
-
-function rowToPublicUser(row: AccountRow): PublicUser {
-  return {
-    id: row.id,
-    name: row.name,
-    email: row.email,
-    phone: row.phone,
-    role: row.role,
-    address: row.address ?? { street: '', city: '', state: '', country: '', zip: '' },
-    createdAt: row.created_at,
-  }
-}
-
-export async function listUsers(): Promise<UserWithStats[]> {
+export function listUsers(): UserWithStats[] {
   requireAdmin()
-  const { data, error } = await supabase
-    .from('accounts')
-    .select('id, name, email, phone, role, address, created_at')
-    .order('created_at', { ascending: false })
-  if (error) throw new Error('Could not load users')
-
-  const users = (data as AccountRow[]).map(rowToPublicUser)
+  const users = readCollection<import('../types/models').UserRecord>(KEYS.users)
   const shipments = listAllShipments()
   const payments = listAllPayments()
-
-  return users.map((u) => ({
-    ...u,
-    shipmentCount: shipments.filter((s) => s.userId === u.id).length,
-    paymentCount: payments.filter((p) => p.userId === u.id).length,
-  }))
+  return users
+    .map((u) => ({
+      id: u.id,
+      name: u.name,
+      email: u.email,
+      phone: u.phone,
+      role: u.role,
+      address: u.address,
+      createdAt: u.createdAt,
+      shipmentCount: shipments.filter((s) => s.userId === u.id).length,
+      paymentCount: payments.filter((p) => p.userId === u.id).length,
+    }))
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
 }
 
-export async function getUserById(id: string): Promise<PublicUser | null> {
+export function getUserById(id: string): PublicUser | null {
   requireAdmin()
-  const { data, error } = await supabase
-    .from('accounts')
-    .select('id, name, email, phone, role, address, created_at')
-    .eq('id', id)
-    .maybeSingle()
-  if (error || !data) return null
-  return rowToPublicUser(data as AccountRow)
+  const u = readCollection<import('../types/models').UserRecord>(KEYS.users).find(
+    (x) => x.id === id,
+  )
+  if (!u) return null
+  const { passwordHash: _ph, ...rest } = u
+  return rest
 }
 
-export async function countUsers(): Promise<number> {
-  const { count, error } = await supabase
-    .from('accounts')
-    .select('*', { count: 'exact', head: true })
-  if (error) return 0
-  return count ?? 0
+export function countUsers(): number {
+  return readCollection<import('../types/models').UserRecord>(KEYS.users).length
 }
 
 /** Role changes are admin-only and never allowed on your own account. */
-export async function updateUserRole(userId: string, role: UserRole, adminId: string): Promise<void> {
+export function updateUserRole(userId: string, role: UserRole, adminId: string): void {
   const admin = requireAdmin()
   if (userId === adminId || userId === admin.id) {
     throw new Error('You cannot change your own role')
   }
-  const { error } = await supabase
-    .from('accounts')
-    .update({ role, updated_at: new Date().toISOString() })
-    .eq('id', userId)
-  if (error) throw new Error('Could not update role')
+  // Lazy import avoided: users collection handled directly here.
+  const usersRaw = localStorage.getItem(KEYS.users)
+  const users: import('../types/models').UserRecord[] = usersRaw ? JSON.parse(usersRaw) : []
+  const target = users.find((u) => u.id === userId)
+  if (!target) throw new Error('User not found')
+  const updated = users.map((u) =>
+    u.id === userId ? { ...u, role, updatedAt: new Date().toISOString() } : u,
+  )
+  localStorage.setItem(KEYS.users, JSON.stringify(updated))
 }
