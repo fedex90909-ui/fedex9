@@ -1,4 +1,4 @@
-import type { PublicUser, UserRole, UserWithStats, UserRecord, UserAddress } from '../types/models'
+import type { PublicUser, UserRole, UserWithStats, UserAddress } from '../types/models'
 import { requireAdmin } from './authService'
 import { listAllShipments } from './shipmentsService'
 import { listAllPayments } from './paymentsService'

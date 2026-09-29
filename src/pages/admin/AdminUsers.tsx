@@ -1,9 +1,9 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { Search, ShieldCheck, UserRound } from 'lucide-react'
 import Modal from '../../components/Modal'
 import { useToast } from '../../context/ToastContext'
-import { getUserById, listUsers, updateUserRole } from '../../services/usersService'
+import { listUsers, updateUserRole } from '../../services/usersService'
 import { listAllShipments } from '../../services/shipmentsService'
 import { listAllPayments } from '../../services/paymentsService'
 import { useAuth } from '../../hooks/useAuth'
@@ -12,15 +12,19 @@ import type { PaymentRecord, ShipmentRecord, UserWithStats } from '../../types/m
 
 export default function AdminUsers() {
   const [tick, setTick] = useState(0)
-  const users = useMemo(() => listUsers(), [tick])
+  const [users, setUsers] = useState<UserWithStats[]>([])
   const { user: me } = useAuth()
   const toast = useToast()
   const [query, setQuery] = useState('')
   const [managing, setManaging] = useState<UserWithStats | null>(null)
   const [pendingRole, setPendingRole] = useState<'user' | 'admin' | null>(null)
 
-  const shipments = useMemo(() => listAllShipments(), [tick])
-  const payments = useMemo(() => listAllPayments(), [tick])
+  const shipments = listAllShipments()
+  const payments = listAllPayments()
+
+  useEffect(() => {
+    listUsers().then(setUsers)
+  }, [tick])
 
   const filtered = users.filter((u) => {
     const q = query.trim().toLowerCase()
@@ -28,10 +32,10 @@ export default function AdminUsers() {
     return [u.name, u.email, u.phone].join(' ').toLowerCase().includes(q)
   })
 
-  function applyRoleChange() {
+  async function applyRoleChange() {
     if (!managing || !pendingRole) return
     try {
-      updateUserRole(managing.id, pendingRole, me?.id ?? '')
+      await updateUserRole(managing.id, pendingRole, me?.id ?? '')
       toast.success('Role updated', `${managing.name} is now ${pendingRole === 'admin' ? 'an administrator' : 'a user'}.`)
       setPendingRole(null)
       setManaging(null)

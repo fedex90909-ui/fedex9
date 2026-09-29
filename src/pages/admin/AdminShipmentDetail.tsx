@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import {
   ArrowLeft,
@@ -27,7 +27,7 @@ import { getUserById } from '../../services/usersService'
 import { toShipmentView } from '../../lib/tracking'
 import { currency, formatDate, formatDateTime } from '../../lib/format'
 import { STATUS_META } from '../../lib/tracking'
-import type { PaymentStatus, ShipmentRecord } from '../../types/models'
+import type { PaymentStatus, PublicUser, ShipmentRecord } from '../../types/models'
 import type { ShipmentStatus } from '../../lib/types'
 
 const ALL_STATUSES: ShipmentStatus[] = [
@@ -67,10 +67,15 @@ export default function AdminShipmentDetail() {
   const shipment: ShipmentRecord | null = useMemo(() => (id ? getShipmentById(id) : null), [id, tick])
   const events = useMemo(() => (id ? getEventsForShipment(id) : []), [id, tick])
   const payment = useMemo(() => (id ? getPaymentForShipment(id) : null), [id, tick])
-  const customer = useMemo(
-    () => (shipment?.userId ? getUserById(shipment.userId) : null),
-    [shipment, tick],
-  )
+  const [customer, setCustomer] = useState<PublicUser | null>(null)
+
+  useEffect(() => {
+    if (!shipment?.userId) {
+      setCustomer(null)
+      return
+    }
+    getUserById(shipment.userId).then(setCustomer)
+  }, [shipment?.userId, tick])
 
   const reload = useCallback(() => setTick((t) => t + 1), [])
 

@@ -35,8 +35,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     ensureSeedData()
-    setUser(authService.currentUser())
-    setBooting(false)
+    authService.currentUser().then((u) => {
+      setUser(u)
+      setBooting(false)
+    })
   }, [])
 
   const signIn = useCallback(async (email: string, password: string, remember: boolean) => {
@@ -70,7 +72,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   )
 
   const refresh = useCallback(() => {
-    setUser(authService.currentUser())
+    authService.currentUser().then((u) => setUser(u))
   }, [])
 
   const api = useMemo<AuthApi>(
