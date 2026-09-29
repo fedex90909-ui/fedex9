@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { Search, ShieldCheck, UserRound } from 'lucide-react'
 import Modal from '../../components/Modal'
@@ -19,11 +19,16 @@ export default function AdminUsers() {
   const [managing, setManaging] = useState<UserWithStats | null>(null)
   const [pendingRole, setPendingRole] = useState<'user' | 'admin' | null>(null)
 
-  const shipments = listAllShipments()
-  const payments = listAllPayments()
+  const shipments = useMemo(() => listAllShipments(), [tick])
+  const payments = useMemo(() => listAllPayments(), [tick])
 
   useEffect(() => {
-    listUsers().then(setUsers)
+    listUsers()
+      .then(setUsers)
+      .catch((err) => {
+        console.error('Failed to load users:', err)
+        toast.error('Could not load users', err instanceof Error ? err.message : 'Try refreshing the page.')
+      })
   }, [tick])
 
   const filtered = users.filter((u) => {

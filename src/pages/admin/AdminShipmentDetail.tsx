@@ -74,7 +74,9 @@ export default function AdminShipmentDetail() {
       setCustomer(null)
       return
     }
-    getUserById(shipment.userId).then(setCustomer)
+    getUserById(shipment.userId)
+      .then(setCustomer)
+      .catch(() => setCustomer(null))
   }, [shipment?.userId, tick])
 
   const reload = useCallback(() => setTick((t) => t + 1), [])
