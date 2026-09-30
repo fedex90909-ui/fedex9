@@ -2,26 +2,74 @@ import type { ShipmentRecord, TrackingEventRecord } from '../types/models'
 import type { BookingDraft } from '../lib/types'
 import { estimateDeliveryFor, getDeliveryOption, priceFor } from '../lib/pricing'
 import { EVENT_SPECS, shippingMethodName } from '../lib/tracking'
-import { KEYS, newReference, newTrackingNumber, readCollection, uid, writeCollection } from './db'
+import { supabase } from '../lib/supabaseClient'
+import { uid, newReference, newTrackingNumber } from './db'
 import { AuthError, requireAdmin, requireUser } from './authService'
 
-function readShipments(): ShipmentRecord[] {
-  return readCollection<ShipmentRecord>(KEYS.shipments)
+interface DbShipment {
+  id: string
+  user_id: string | null
+  reference: string
+  tracking_number: string
+  sender: Record<string, unknown>
+  recipient: Record<string, unknown>
+  pkg: Record<string, unknown>
+  option_id: string
+  shipping_method: string
+  price: number
+  status: string
+  current_location: string
+  estimated_delivery: string
+  payment_status: string
+  is_demo: boolean
+  created_at: string
+  updated_at: string
 }
 
-function writeShipments(s: ShipmentRecord[]): void {
-  writeCollection(KEYS.shipments, s)
+interface DbTrackingEvent {
+  id: string
+  shipment_id: string
+  status: string
+  location: string
+  note: string
+  timestamp: string
+  source: string
 }
 
-function readEvents(): TrackingEventRecord[] {
-  return readCollection<TrackingEventRecord>(KEYS.events)
+function dbToShipment(r: DbShipment): ShipmentRecord {
+  return {
+    id: r.id,
+    userId: r.user_id,
+    reference: r.reference,
+    trackingNumber: r.tracking_number,
+    sender: r.sender as unknown as ShipmentRecord['sender'],
+    recipient: r.recipient as unknown as ShipmentRecord['recipient'],
+    pkg: r.pkg as unknown as ShipmentRecord['pkg'],
+    optionId: r.option_id,
+    shippingMethod: r.shipping_method,
+    price: Number(r.price),
+    status: r.status as ShipmentRecord['status'],
+    currentLocation: r.current_location,
+    estimatedDelivery: r.estimated_delivery,
+    paymentStatus: r.payment_status as ShipmentRecord['paymentStatus'],
+    isDemo: r.is_demo,
+    createdAt: r.created_at,
+    updatedAt: r.updated_at,
+  }
 }
 
-function appendEvent(event: TrackingEventRecord): void {
-  writeCollection(KEYS.events, [...readEvents(), event])
+function dbToEvent(r: DbTrackingEvent): TrackingEventRecord {
+  return {
+    id: r.id,
+    shipmentId: r.shipment_id,
+    status: r.status as TrackingEventRecord['status'],
+    location: r.location,
+    note: r.note,
+    timestamp: r.timestamp,
+    source: r.source as TrackingEventRecord['source'],
+  }
 }
 
-/** Creates the shipment against the signed-in user's account. */
 export async function createShipment(draft: BookingDraft): Promise<ShipmentRecord> {
   const user = requireUser()
   const option = getDeliveryOption(draft.optionId ?? '')
@@ -47,52 +95,97 @@ export async function createShipment(draft: BookingDraft): Promise<ShipmentRecor
     createdAt: now.toISOString(),
     updatedAt: now.toISOString(),
   }
-  writeShipments([record, ...readShipments()])
-  appendEvent({
+
+  const { error } = await supabase.from('shipments').insert({
+    id: record.id,
+    user_id: record.userId,
+    reference: record.reference,
+    tracking_number: record.trackingNumber,
+    sender: record.sender,
+    recipient: record.recipient,
+    pkg: record.pkg,
+    option_id: record.optionId,
+    shipping_method: record.shippingMethod,
+    price: record.price,
+    status: record.status,
+    current_location: record.currentLocation,
+    estimated_delivery: record.estimatedDelivery,
+    payment_status: record.paymentStatus,
+    is_demo: false,
+    created_at: record.createdAt,
+    updated_at: record.updatedAt,
+  })
+  if (error) throw new Error('Could not create shipment')
+
+  await supabase.from('tracking_events').insert({
     id: uid('evt'),
-    shipmentId: id,
+    shipment_id: id,
     status: 'created',
     location: `${draft.sender.city} — Origin`,
     note: EVENT_SPECS[0].note,
     timestamp: now.toISOString(),
     source: 'system',
   })
+
   return record
 }
 
-export function getShipmentById(id: string): ShipmentRecord | null {
-  return readShipments().find((s) => s.id === id) ?? null
+export async function getShipmentById(id: string): Promise<ShipmentRecord | null> {
+  const { data, error } = await supabase
+    .from('shipments')
+    .select('*')
+    .eq('id', id)
+    .maybeSingle()
+  if (error || !data) return null
+  return dbToShipment(data as DbShipment)
 }
 
-export function getShipmentByTrackingNumber(trackingNumber: string): ShipmentRecord | null {
+export async function getShipmentByTrackingNumber(trackingNumber: string): Promise<ShipmentRecord | null> {
   const n = trackingNumber.replace(/[\s-]/g, '').trim()
   if (!n) return null
-  return readShipments().find((s) => s.trackingNumber === n) ?? null
+  const { data, error } = await supabase
+    .from('shipments')
+    .select('*')
+    .eq('tracking_number', n)
+    .maybeSingle()
+  if (error || !data) return null
+  return dbToShipment(data as DbShipment)
 }
 
-/** Customers only ever see their own shipments (enforced here, not just in UI). */
-export function listMyShipments(): ShipmentRecord[] {
+export async function listMyShipments(): Promise<ShipmentRecord[]> {
   const user = requireUser()
-  return readShipments()
-    .filter((s) => s.userId === user.id)
-    .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+  const { data, error } = await supabase
+    .from('shipments')
+    .select('*')
+    .eq('user_id', user.id)
+    .order('created_at', { ascending: false })
+  if (error) return []
+  return (data as DbShipment[]).map(dbToShipment)
 }
 
-/** Admin-only: every shipment in the system. */
-export function listAllShipments(): ShipmentRecord[] {
+export async function listAllShipments(): Promise<ShipmentRecord[]> {
   requireAdmin()
-  return readShipments().sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+  const { data, error } = await supabase
+    .from('shipments')
+    .select('*')
+    .order('created_at', { ascending: false })
+  if (error) return []
+  return (data as DbShipment[]).map(dbToShipment)
 }
 
-export function getEventsForShipment(shipmentId: string): TrackingEventRecord[] {
-  return readEvents()
-    .filter((e) => e.shipmentId === shipmentId)
-    .sort((a, b) => a.timestamp.localeCompare(b.timestamp))
+export async function getEventsForShipment(shipmentId: string): Promise<TrackingEventRecord[]> {
+  const { data, error } = await supabase
+    .from('tracking_events')
+    .select('*')
+    .eq('shipment_id', shipmentId)
+    .order('timestamp', { ascending: true })
+  if (error || !data) return []
+  return (data as DbTrackingEvent[]).map(dbToEvent)
 }
 
-export function assertOwnership(shipmentId: string): ShipmentRecord {
+export async function assertOwnership(shipmentId: string): Promise<ShipmentRecord> {
   const user = requireUser()
-  const shipment = getShipmentById(shipmentId)
+  const shipment = await getShipmentById(shipmentId)
   if (!shipment) throw new Error('Shipment not found')
   if (shipment.userId !== user.id && user.role !== 'admin') {
     throw new AuthError('You can only access your own shipments')
@@ -109,40 +202,41 @@ export interface StatusUpdate {
   timestamp?: string
 }
 
-export function updateShipmentStatus(shipmentId: string, update: StatusUpdate): ShipmentRecord {
+export async function updateShipmentStatus(shipmentId: string, update: StatusUpdate): Promise<ShipmentRecord> {
   requireAdmin()
-  const shipments = readShipments()
-  const shipment = shipments.find((s) => s.id === shipmentId)
+  const shipment = await getShipmentById(shipmentId)
   if (!shipment) throw new Error('Shipment not found')
   const now = new Date().toISOString()
   const timestamp = update.timestamp ?? now
-  appendEvent({
+  const location = update.location?.trim() || shipment.currentLocation
+
+  await supabase.from('tracking_events').insert({
     id: uid('evt'),
-    shipmentId,
+    shipment_id: shipmentId,
     status: update.status,
-    location: update.location?.trim() || shipment.currentLocation,
+    location,
     note: update.note?.trim() || '',
     timestamp,
     source: 'admin',
   })
-  const updated: ShipmentRecord = {
-    ...shipment,
-    status: update.status,
-    currentLocation: update.location?.trim() || shipment.currentLocation,
-    updatedAt: now,
-  }
-  writeShipments(shipments.map((s) => (s.id === shipmentId ? updated : s)))
-  return updated
+
+  const { error } = await supabase
+    .from('shipments')
+    .update({ status: update.status, current_location: location, updated_at: now })
+    .eq('id', shipmentId)
+  if (error) throw new Error('Could not update shipment')
+
+  return { ...shipment, status: update.status, currentLocation: location, updatedAt: now }
 }
 
-export function cancelShipment(shipmentId: string, note?: string): ShipmentRecord {
+export async function cancelShipment(shipmentId: string, note?: string): Promise<ShipmentRecord> {
   return updateShipmentStatus(shipmentId, {
     status: 'cancelled',
     note: note || 'Shipment cancelled by FedEx administration.',
   })
 }
 
-export function markDelivered(shipmentId: string, location?: string): ShipmentRecord {
+export async function markDelivered(shipmentId: string, location?: string): Promise<ShipmentRecord> {
   return updateShipmentStatus(shipmentId, {
     status: 'delivered',
     location,
@@ -150,13 +244,10 @@ export function markDelivered(shipmentId: string, location?: string): ShipmentRe
   })
 }
 
-export function setPaymentStatusOnShipment(shipmentId: string, status: ShipmentRecord['paymentStatus']): void {
-  const shipments = readShipments()
-  const shipment = shipments.find((s) => s.id === shipmentId)
-  if (!shipment) return
-  writeShipments(
-    shipments.map((s) =>
-      s.id === shipmentId ? { ...s, paymentStatus: status, updatedAt: new Date().toISOString() } : s,
-    ),
-  )
+export async function setPaymentStatusOnShipment(shipmentId: string, status: ShipmentRecord['paymentStatus']): Promise<void> {
+  const now = new Date().toISOString()
+  await supabase
+    .from('shipments')
+    .update({ payment_status: status, updated_at: now })
+    .eq('id', shipmentId)
 }

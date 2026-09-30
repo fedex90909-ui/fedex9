@@ -1,7 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react'
 import type { ReactNode } from 'react'
 import type { PublicUser, UserAddress } from '../types/models'
-import { ensureSeedData } from '../services/db'
 import * as authService from '../services/authService'
 
 interface AuthApi {
@@ -34,7 +33,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [booting, setBooting] = useState(true)
 
   useEffect(() => {
-    ensureSeedData()
     setUser(authService.currentUser())
     setBooting(false)
   }, [])

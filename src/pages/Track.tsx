@@ -27,8 +27,10 @@ export default function Track() {
     const n = normalizeTrackingNumber(number)
     setPhase('loading')
     setSearchedNumber(n)
-    const t = window.setTimeout(() => {
-      const s = lookupTracking(n)
+    let active = true
+    const t = window.setTimeout(async () => {
+      const s = await lookupTracking(n)
+      if (!active) return
       if (s) {
         setResult(s)
         setPhase('found')
@@ -37,10 +39,9 @@ export default function Track() {
         setPhase('notfound')
       }
     }, 850)
-    return () => window.clearTimeout(t)
+    return () => { active = false; window.clearTimeout(t) }
   }, [number])
 
-  // Allow deep links like /track?n=7946... to route through the :number form.
   useEffect(() => {
     const q = searchParams.get('n')
     if (q) navigate(`/track/${normalizeTrackingNumber(q)}`, { replace: true })
@@ -104,11 +105,7 @@ function DemoChips() {
             >
               {s.label}
             </span>
-            <ArrowRight
-              size={12}
-              className="text-gray-300 transition group-hover:text-fx-purple-600"
-              aria-hidden
-            />
+            <ArrowRight size={12} className="text-gray-300 transition group-hover:text-fx-purple-600" aria-hidden />
           </Link>
         ))}
       </div>

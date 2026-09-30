@@ -1,12 +1,30 @@
-import { useMemo } from 'react'
+import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { ArrowRight } from 'lucide-react'
+import { ArrowRight, Loader2 } from 'lucide-react'
 import { ShipmentStatusBadge, PaymentStatusBadge } from '../../components/StatusBadge'
 import { listMyShipments } from '../../services/shipmentsService'
 import { currency, formatDate } from '../../lib/format'
+import type { ShipmentRecord } from '../../types/models'
 
 export default function MyShipments() {
-  const shipments = useMemo(() => listMyShipments(), [])
+  const [shipments, setShipments] = useState<ShipmentRecord[]>([])
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    let active = true
+    listMyShipments().then((s) => {
+      if (active) { setShipments(s); setLoading(false) }
+    })
+    return () => { active = false }
+  }, [])
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center py-20">
+        <Loader2 size={28} className="animate-spin text-fx-purple-600" aria-hidden />
+      </div>
+    )
+  }
 
   return (
     <div className="space-y-6">
@@ -55,24 +73,15 @@ export default function MyShipments() {
               {shipments.map((s) => (
                 <tr key={s.id} className="group transition hover:bg-fx-purple-50/40">
                   <td className="px-5 py-4">
-                    <Link
-                      to={`/track/${s.trackingNumber}`}
-                      className="font-mono text-[13px] font-bold text-fx-purple-700 group-hover:underline"
-                    >
+                    <Link to={`/track/${s.trackingNumber}`} className="font-mono text-[13px] font-bold text-fx-purple-700 group-hover:underline">
                       {s.trackingNumber}
                     </Link>
                   </td>
-                  <td className="px-5 py-4 font-semibold text-ink">
-                    {s.sender.city} → {s.recipient.city}
-                  </td>
+                  <td className="px-5 py-4 font-semibold text-ink">{s.sender.city} → {s.recipient.city}</td>
                   <td className="px-5 py-4 text-gray-600">{s.shippingMethod}</td>
                   <td className="px-5 py-4 font-bold text-ink">{currency(s.price)}</td>
-                  <td className="px-5 py-4">
-                    <ShipmentStatusBadge status={s.status} />
-                  </td>
-                  <td className="px-5 py-4">
-                    <PaymentStatusBadge status={s.paymentStatus} />
-                  </td>
+                  <td className="px-5 py-4"><ShipmentStatusBadge status={s.status} /></td>
+                  <td className="px-5 py-4"><PaymentStatusBadge status={s.paymentStatus} /></td>
                   <td className="px-5 py-4 text-gray-600">{formatDate(s.estimatedDelivery)}</td>
                   <td className="px-5 py-4 text-gray-500">{formatDate(s.createdAt)}</td>
                 </tr>

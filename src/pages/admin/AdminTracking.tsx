@@ -1,20 +1,23 @@
-import { useMemo, useState } from 'react'
+import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { ArrowRight, Search } from 'lucide-react'
+import { ArrowRight, Loader2, Search } from 'lucide-react'
 import { useToast } from '../../context/ToastContext'
 import { lookupTracking } from '../../services/trackingService'
 import { getShipmentByTrackingNumber } from '../../services/shipmentsService'
 import TrackingResult from '../../components/TrackingResult'
 import { normalizeTrackingNumber } from '../../lib/tracking'
+import type { Shipment } from '../../lib/types'
 
 export default function AdminTracking() {
   const [value, setValue] = useState('')
   const [error, setError] = useState('')
+  const [searching, setSearching] = useState(false)
+  const [result, setResult] = useState<Shipment | null>(null)
+  const [recordId, setRecordId] = useState<string | undefined>(undefined)
   const navigate = useNavigate()
   const toast = useToast()
-  const [result, setResult] = useState<ReturnType<typeof lookupTracking>>(null)
 
-  function submit(e: React.FormEvent) {
+  async function submit(e: React.FormEvent) {
     e.preventDefault()
     const n = normalizeTrackingNumber(value)
     if (!n) {
@@ -22,20 +25,25 @@ export default function AdminTracking() {
       setResult(null)
       return
     }
-    const found = lookupTracking(n)
-    if (!found) {
-      setError(`No shipment found for ${n}`)
-      setResult(null)
-      return
-    }
+    setSearching(true)
     setError('')
-    setResult(found)
+    try {
+      const found = await lookupTracking(n)
+      if (!found) {
+        setError(`No shipment found for ${n}`)
+        setResult(null)
+        return
+      }
+      setResult(found)
+      const record = await getShipmentByTrackingNumber(found.trackingNumber)
+      setRecordId(record?.id)
+    } catch {
+      setError('Lookup failed. Try again.')
+      setResult(null)
+    } finally {
+      setSearching(false)
+    }
   }
-
-  const recordId = useMemo(
-    () => (result ? getShipmentByTrackingNumber(result.trackingNumber)?.id : undefined),
-    [result],
-  )
 
   return (
     <div className="space-y-6">
@@ -54,18 +62,15 @@ export default function AdminTracking() {
           <Search size={16} className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-gray-400" aria-hidden />
           <input
             value={value}
-            onChange={(e) => {
-              setValue(e.target.value)
-              setError('')
-            }}
+            onChange={(e) => { setValue(e.target.value); setError('') }}
             placeholder="Enter tracking number"
             aria-label="Tracking number"
             className="input py-3 pl-11"
             inputMode="numeric"
           />
         </div>
-        <button type="submit" className="btn-primary">
-          Look up
+        <button type="submit" disabled={searching} className="btn-primary">
+          {searching ? <Loader2 size={16} className="animate-spin" aria-hidden /> : 'Look up'}
         </button>
       </form>
 
@@ -78,10 +83,7 @@ export default function AdminTracking() {
       {result && (
         <div className="space-y-4">
           {recordId && (
-            <button
-              onClick={() => navigate(`/admin/shipments/${recordId}`)}
-              className="btn-purple"
-            >
+            <button onClick={() => navigate(`/admin/shipments/${recordId}`)} className="btn-purple">
               Open in shipment manager <ArrowRight size={15} aria-hidden />
             </button>
           )}

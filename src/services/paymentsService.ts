@@ -1,14 +1,37 @@
 import type { CardMeta, PaymentMethodKind, PaymentRecord, PaymentStatus, TransferMeta } from '../types/models'
-import { KEYS, newReference, readCollection, uid, writeCollection } from './db'
+import { supabase } from '../lib/supabaseClient'
+import { uid, newReference } from './db'
 import { AuthError, requireAdmin, requireUser } from './authService'
 import { getShipmentById, setPaymentStatusOnShipment } from './shipmentsService'
 
-function readPayments(): PaymentRecord[] {
-  return readCollection<PaymentRecord>(KEYS.payments)
+interface DbPayment {
+  id: string
+  shipment_id: string
+  user_id: string | null
+  method: string
+  amount: number
+  status: string
+  reference: string
+  card: Record<string, unknown> | null
+  transfer: Record<string, unknown> | null
+  created_at: string
+  updated_at: string
 }
 
-function writePayments(p: PaymentRecord[]): void {
-  writeCollection(KEYS.payments, p)
+function dbToPayment(r: DbPayment): PaymentRecord {
+  return {
+    id: r.id,
+    shipmentId: r.shipment_id,
+    userId: r.user_id,
+    method: r.method as PaymentMethodKind,
+    amount: Number(r.amount),
+    status: r.status as PaymentStatus,
+    reference: r.reference,
+    card: r.card ? (r.card as unknown as CardMeta) : undefined,
+    transfer: r.transfer ? (r.transfer as unknown as TransferMeta) : undefined,
+    createdAt: r.created_at,
+    updatedAt: r.updated_at,
+  }
 }
 
 export interface CreatePaymentInput {
@@ -18,20 +41,13 @@ export interface CreatePaymentInput {
   transfer?: TransferMeta
 }
 
-/**
- * Creates a payment record with status `pending`. In this demo the card
- * details the customer entered (name, number, CVV, expiry, billing address)
- * are stored with the record so the admin can process the order — a real
- * payment gateway (Stripe, Adyen…) replaces this module's internals and only
- * masked metadata would ever be kept.
- */
 export async function createPayment(input: CreatePaymentInput): Promise<PaymentRecord> {
   const user = requireUser()
-  const shipment = getShipmentById(input.shipmentId)
+  const shipment = await getShipmentById(input.shipmentId)
   if (!shipment) throw new Error('Shipment not found')
   if (shipment.userId !== user.id) throw new AuthError('You can only pay for your own shipments')
 
-  await new Promise((r) => setTimeout(r, 1400)) // simulated provider round-trip
+  await new Promise((r) => setTimeout(r, 1400))
 
   const now = new Date().toISOString()
   const payment: PaymentRecord = {
@@ -42,41 +58,72 @@ export async function createPayment(input: CreatePaymentInput): Promise<PaymentR
     amount: shipment.price,
     status: 'pending',
     reference: newReference('PAY'),
-    card:
-      input.method === 'card' && input.card
-        ? input.card
-        : undefined,
+    card: input.method === 'card' && input.card ? input.card : undefined,
     transfer: input.method === 'transfer' ? input.transfer : undefined,
     createdAt: now,
     updatedAt: now,
   }
-  writePayments([payment, ...readPayments()])
-  setPaymentStatusOnShipment(shipment.id, 'pending')
+
+  const { error } = await supabase.from('payments').insert({
+    id: payment.id,
+    shipment_id: payment.shipmentId,
+    user_id: payment.userId,
+    method: payment.method,
+    amount: payment.amount,
+    status: payment.status,
+    reference: payment.reference,
+    card: payment.card ?? null,
+    transfer: payment.transfer ?? null,
+    created_at: payment.createdAt,
+    updated_at: payment.updatedAt,
+  })
+  if (error) throw new Error('Could not create payment record')
+
+  await setPaymentStatusOnShipment(shipment.id, 'pending')
   return payment
 }
 
-export function getPaymentById(id: string): PaymentRecord | null {
-  return readPayments().find((p) => p.id === id) ?? null
+export async function getPaymentById(id: string): Promise<PaymentRecord | null> {
+  const { data, error } = await supabase
+    .from('payments')
+    .select('*')
+    .eq('id', id)
+    .maybeSingle()
+  if (error || !data) return null
+  return dbToPayment(data as DbPayment)
 }
 
-export function getPaymentForShipment(shipmentId: string): PaymentRecord | null {
-  return (
-    readPayments()
-      .filter((p) => p.shipmentId === shipmentId)
-      .sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0] ?? null
-  )
+export async function getPaymentForShipment(shipmentId: string): Promise<PaymentRecord | null> {
+  const { data, error } = await supabase
+    .from('payments')
+    .select('*')
+    .eq('shipment_id', shipmentId)
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle()
+  if (error || !data) return null
+  return dbToPayment(data as DbPayment)
 }
 
-export function listMyPayments(): PaymentRecord[] {
+export async function listMyPayments(): Promise<PaymentRecord[]> {
   const user = requireUser()
-  return readPayments()
-    .filter((p) => p.userId === user.id)
-    .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+  const { data, error } = await supabase
+    .from('payments')
+    .select('*')
+    .eq('user_id', user.id)
+    .order('created_at', { ascending: false })
+  if (error) return []
+  return (data as DbPayment[]).map(dbToPayment)
 }
 
-export function listAllPayments(): PaymentRecord[] {
+export async function listAllPayments(): Promise<PaymentRecord[]> {
   requireAdmin()
-  return readPayments().sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+  const { data, error } = await supabase
+    .from('payments')
+    .select('*')
+    .order('created_at', { ascending: false })
+  if (error) return []
+  return (data as DbPayment[]).map(dbToPayment)
 }
 
 const SHIPMENT_PAYMENT_STATUS: Record<PaymentStatus, 'unpaid' | PaymentStatus> = {
@@ -87,14 +134,16 @@ const SHIPMENT_PAYMENT_STATUS: Record<PaymentStatus, 'unpaid' | PaymentStatus> =
   refunded: 'refunded',
 }
 
-/** Admin: move a payment through pending → processing → paid/failed/refunded. */
-export function updatePaymentStatus(paymentId: string, status: PaymentStatus): PaymentRecord {
+export async function updatePaymentStatus(paymentId: string, status: PaymentStatus): Promise<PaymentRecord> {
   requireAdmin()
-  const payments = readPayments()
-  const payment = payments.find((p) => p.id === paymentId)
+  const payment = await getPaymentById(paymentId)
   if (!payment) throw new Error('Payment not found')
-  const updated: PaymentRecord = { ...payment, status, updatedAt: new Date().toISOString() }
-  writePayments(payments.map((p) => (p.id === paymentId ? updated : p)))
-  setPaymentStatusOnShipment(payment.shipmentId, SHIPMENT_PAYMENT_STATUS[status])
-  return updated
+  const now = new Date().toISOString()
+  const { error } = await supabase
+    .from('payments')
+    .update({ status, updated_at: now })
+    .eq('id', paymentId)
+  if (error) throw new Error('Could not update payment')
+  await setPaymentStatusOnShipment(payment.shipmentId, SHIPMENT_PAYMENT_STATUS[status])
+  return { ...payment, status, updatedAt: now }
 }

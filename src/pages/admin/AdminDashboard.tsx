@@ -1,17 +1,19 @@
-import { useMemo } from 'react'
+import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import {
   Boxes,
   Clock3,
   CreditCard,
+  Loader2,
   Users,
 } from 'lucide-react'
 import { BarChartMini, DonutMini } from '../../components/charts/MiniCharts'
-import { ShipmentStatusBadge, PaymentStatusBadge } from '../../components/StatusBadge'
+import { ShipmentStatusBadge } from '../../components/StatusBadge'
 import { listAllShipments } from '../../services/shipmentsService'
 import { listAllPayments } from '../../services/paymentsService'
 import { countUsers } from '../../services/usersService'
-import { currency, formatDate } from '../../lib/format'
+import { currency } from '../../lib/format'
+import type { PaymentRecord, ShipmentRecord } from '../../types/models'
 
 const STATUS_COLORS: Record<string, string> = {
   created: '#9CA3AF',
@@ -33,9 +35,30 @@ const PAYMENT_COLORS: Record<string, string> = {
 }
 
 export default function AdminDashboard() {
-  const shipments = useMemo(() => listAllShipments(), [])
-  const payments = useMemo(() => listAllPayments(), [])
-  const userCount = useMemo(() => countUsers(), [])
+  const [shipments, setShipments] = useState<ShipmentRecord[]>([])
+  const [payments, setPayments] = useState<PaymentRecord[]>([])
+  const [userCount, setUserCount] = useState(0)
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    let active = true
+    Promise.all([listAllShipments(), listAllPayments(), countUsers()]).then(([s, p, c]) => {
+      if (!active) return
+      setShipments(s)
+      setPayments(p)
+      setUserCount(c)
+      setLoading(false)
+    })
+    return () => { active = false }
+  }, [])
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center py-20">
+        <Loader2 size={28} className="animate-spin text-fx-purple-600" aria-hidden />
+      </div>
+    )
+  }
 
   const byStatus = (status: string) => shipments.filter((s) => s.status === status).length
   const pendingPayments = payments.filter((p) => p.status === 'pending').length
@@ -70,7 +93,6 @@ export default function AdminDashboard() {
         </p>
       </header>
 
-      {/* Stat cards */}
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
         <Stat icon={Boxes} tone="purple" label="Total shipments" value={shipments.length} />
         <Stat icon={Users} tone="purple" label="Registered users" value={userCount} />
@@ -78,19 +100,13 @@ export default function AdminDashboard() {
         <Stat icon={CreditCard} tone="green" label="Completed payments" value={completedPayments} />
       </div>
 
-      {/* Shipment status cards */}
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
         <MiniStat label="Pending pickups" value={byStatus('created') + byStatus('picked_up')} dot="#9CA3AF" />
-        <MiniStat
-          label="In transit"
-          value={byStatus('in_transit') + byStatus('at_facility')}
-          dot="#4D148C"
-        />
+        <MiniStat label="In transit" value={byStatus('in_transit') + byStatus('at_facility')} dot="#4D148C" />
         <MiniStat label="Out for delivery" value={byStatus('out_for_delivery')} dot="#FF6600" />
         <MiniStat label="Delivered" value={byStatus('delivered')} dot="#16A34A" />
       </div>
 
-      {/* Charts */}
       <div className="grid gap-5 lg:grid-cols-2">
         <div className="card p-6">
           <h2 className="text-base font-extrabold text-ink">Shipments by status</h2>
@@ -101,23 +117,15 @@ export default function AdminDashboard() {
         <div className="card p-6">
           <h2 className="text-base font-extrabold text-ink">Payments overview</h2>
           <div className="mt-5">
-            <DonutMini
-              data={paymentChartData}
-              centerLabel="collected"
-              centerValue={currency(revenue)}
-            />
+            <DonutMini data={paymentChartData} centerLabel="collected" centerValue={currency(revenue)} />
           </div>
         </div>
       </div>
 
-      {/* Recent shipments */}
       <div className="card overflow-hidden">
         <div className="flex items-center justify-between border-b border-gray-100 px-6 py-4">
           <h2 className="text-base font-extrabold text-ink">Latest shipments</h2>
-          <Link
-            to="/admin/shipments"
-            className="text-xs font-extrabold text-fx-purple-700 hover:text-fx-orange-600"
-          >
+          <Link to="/admin/shipments" className="text-xs font-extrabold text-fx-purple-700 hover:text-fx-orange-600">
             Manage all →
           </Link>
         </div>
@@ -151,17 +159,7 @@ const TONES = {
   green: 'bg-green-50 text-green-600',
 } as const
 
-function Stat({
-  icon: Icon,
-  tone,
-  label,
-  value,
-}: {
-  icon: typeof Users
-  tone: keyof typeof TONES
-  label: string
-  value: number
-}) {
+function Stat({ icon: Icon, tone, label, value }: { icon: typeof Users; tone: keyof typeof TONES; label: string; value: number }) {
   return (
     <div className="card p-5">
       <span className={`grid h-10 w-10 place-items-center rounded-xl ${TONES[tone]}`}>

@@ -1,17 +1,34 @@
-import { useMemo } from 'react'
+import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { ArrowRight, PackageCheck, Clock3, Wallet, ArrowUpRight } from 'lucide-react'
+import { ArrowRight, Clock3, Loader2, PackageCheck, Wallet, ArrowUpRight } from 'lucide-react'
 import { ShipmentStatusBadge, PaymentStatusBadge } from '../../components/StatusBadge'
 import { useAuth } from '../../hooks/useAuth'
 import { listMyPayments } from '../../services/paymentsService'
 import { listMyShipments } from '../../services/shipmentsService'
 import { currency, formatDate } from '../../lib/format'
-import type { ShipmentRecord } from '../../types/models'
+import type { PaymentRecord, ShipmentRecord } from '../../types/models'
 
 export default function AccountDashboard() {
   const { user } = useAuth()
-  const shipments = useMemo(() => listMyShipments(), [])
-  const payments = useMemo(() => listMyPayments(), [])
+  const [shipments, setShipments] = useState<ShipmentRecord[]>([])
+  const [payments, setPayments] = useState<PaymentRecord[]>([])
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    let active = true
+    Promise.all([listMyShipments(), listMyPayments()]).then(([s, p]) => {
+      if (active) { setShipments(s); setPayments(p); setLoading(false) }
+    })
+    return () => { active = false }
+  }, [])
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center py-20">
+        <Loader2 size={28} className="animate-spin text-fx-purple-600" aria-hidden />
+      </div>
+    )
+  }
 
   const active = shipments.filter((s) => !['delivered', 'cancelled'].includes(s.status))
   const delivered = shipments.filter((s) => s.status === 'delivered')
@@ -30,27 +47,17 @@ export default function AccountDashboard() {
         </p>
       </header>
 
-      {/* Stats */}
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
         <StatCard icon={Clock3} label="Active shipments" value={active.length} tone="purple" />
         <StatCard icon={PackageCheck} label="Delivered" value={delivered.length} tone="green" />
         <StatCard icon={Wallet} label="Pending payments" value={pendingPayments.length} tone="orange" />
-        <StatCard
-          icon={ArrowUpRight}
-          label="Total shipped value"
-          value={currency(totalSpent)}
-          tone="purple"
-        />
+        <StatCard icon={ArrowUpRight} label="Total shipped value" value={currency(totalSpent)} tone="purple" />
       </div>
 
-      {/* Recent shipments */}
       <div className="card overflow-hidden">
         <div className="flex items-center justify-between border-b border-gray-100 px-6 py-4">
           <h2 className="text-base font-extrabold text-ink">Recent shipments</h2>
-          <Link
-            to="/account/shipments"
-            className="text-xs font-extrabold text-fx-purple-700 hover:text-fx-orange-600"
-          >
+          <Link to="/account/shipments" className="text-xs font-extrabold text-fx-purple-700 hover:text-fx-orange-600">
             View all →
           </Link>
         </div>
@@ -60,14 +67,9 @@ export default function AccountDashboard() {
           <ul className="divide-y divide-gray-100">
             {shipments.slice(0, 5).map((s) => (
               <li key={s.id}>
-                <Link
-                  to={`/track/${s.trackingNumber}`}
-                  className="flex flex-wrap items-center gap-x-4 gap-y-2 px-6 py-4 transition hover:bg-gray-50/80"
-                >
+                <Link to={`/track/${s.trackingNumber}`} className="flex flex-wrap items-center gap-x-4 gap-y-2 px-6 py-4 transition hover:bg-gray-50/80">
                   <span className="font-mono text-sm font-bold text-ink">{s.trackingNumber}</span>
-                  <span className="text-sm text-gray-500">
-                    {s.sender.city} → {s.recipient.city}
-                  </span>
+                  <span className="text-sm text-gray-500">{s.sender.city} → {s.recipient.city}</span>
                   <span className="ml-auto flex flex-wrap items-center gap-2">
                     <ShipmentStatusBadge status={s.status} />
                     <PaymentStatusBadge status={s.paymentStatus} />
@@ -79,7 +81,6 @@ export default function AccountDashboard() {
         )}
       </div>
 
-      {/* Recent orders */}
       <div className="card overflow-hidden">
         <div className="border-b border-gray-100 px-6 py-4">
           <h2 className="text-base font-extrabold text-ink">Recent orders</h2>
@@ -105,7 +106,6 @@ export default function AccountDashboard() {
         )}
       </div>
 
-      {/* Account info */}
       <div className="card p-6">
         <div className="flex items-center justify-between gap-4">
           <div>
@@ -126,17 +126,7 @@ export default function AccountDashboard() {
   )
 }
 
-function StatCard({
-  icon: Icon,
-  label,
-  value,
-  tone,
-}: {
-  icon: typeof Clock3
-  label: string
-  value: number | string
-  tone: 'purple' | 'orange' | 'green'
-}) {
+function StatCard({ icon: Icon, label, value, tone }: { icon: typeof Clock3; label: string; value: number | string; tone: 'purple' | 'orange' | 'green' }) {
   const tones = {
     purple: 'bg-fx-purple-50 text-fx-purple-600',
     orange: 'bg-fx-orange-50 text-fx-orange-600',
@@ -172,5 +162,3 @@ function EmptyState() {
     </div>
   )
 }
-
-export type { ShipmentRecord }
